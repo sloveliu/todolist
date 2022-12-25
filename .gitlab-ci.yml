@@ -1,0 +1,137 @@
+image: $DEV_REGISTRY_SERVER/root/images/cloudsdk-nodejs:411-18.9
+
+services:
+  - name: docker:18.09-dind
+    command: ["--insecure-registry=registry.cwlove.idv.tw"]
+
+stages:
+  - testing
+  - build
+  - deploy
+  - scan
+
+variables:
+  DOCKER_HOST: tcp://localhost:2375
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: ""
+  IMAGE_NAME: todolist
+
+.registry_login:
+  before_script:
+    - docker login -u $PRODUCTION_REGISTRY_USER -p $PRODUCTION_REGISTRY_PASSWORD $PRODUCTION_REGISTRY_SERVER
+    - docker login -u $DEV_REGISTRY_USER -p $DEV_REGISTRY_PASSWORD $DEV_REGISTRY_SERVER
+
+unit_test:
+  stage: testing
+  artifacts:
+    paths:
+      - report.txt
+    expire_in: "30 days"
+  script:
+    - echo test > test-report.txt
+
+build:
+  extends:
+    - .registry_login
+  stage: build
+  needs:
+    - unit_test
+  script:
+    - npm install
+    - npm run build
+    - IMAGE_VERSION=$(jq -r .version package.json)
+    - DEV_REGISTRY_SERVER=$DEV_REGISTRY_SERVER/root/images
+    - docker build . -t $PRODUCTION_REGISTRY_SERVER/$IMAGE_NAME:$IMAGE_VERSION -t $PRODUCTION_REGISTRY_SERVER/$IMAGE_NAME:latest
+    - docker build . -t $DEV_REGISTRY_SERVER/$IMAGE_NAME:$IMAGE_VERSION -t $DEV_REGISTRY_SERVER/$IMAGE_NAME:latest
+    - docker push $PRODUCTION_REGISTRY_SERVER/$IMAGE_NAME:$IMAGE_VERSION
+    - docker push $PRODUCTION_REGISTRY_SERVER/$IMAGE_NAME:latest
+    - docker push $DEV_REGISTRY_SERVER/$IMAGE_NAME:$IMAGE_VERSION
+    - docker push $DEV_REGISTRY_SERVER/$IMAGE_NAME:latest
+
+.deploy:
+  variables:
+    SSH_PRIVATE_KEY: ""
+    SSH_USER: ""
+    SERVER_URL: ""
+    SSH_KEY_PASSWORD: ""
+    HOME: ""
+    ENV: ""
+    APP_PORT: ""
+  before_script:
+    - eval $(ssh-agent -s)
+    - cat "$ASKPASS" > ./ASKPASS.sh && chmod +x ./ASKPASS.sh
+    - DISPLAY=1 SSH_ASKPASS="./ASKPASS.sh" ssh-add <(echo "$SSH_PRIVATE_KEY") < /dev/null
+  environment:
+    name: $ENV
+    url: http://$SERVER_URL:$APP_PORT
+  script:
+    - IMAGE_VERSION=$(jq -r .version package.json)
+    - ssh -o StrictHostKeyChecking=no $SSH_USER@$SERVER_URL "[ -d $HOME ] && echo ok || mkdir -p $HOME"
+    - scp -o StrictHostKeyChecking=no ./docker-compose.yml $SSH_USER@$SERVER_URL:$HOME
+    - ssh -o StrictHostKeyChecking=no $SSH_USER@$SERVER_URL "
+      docker login -u $PRODUCTION_REGISTRY_USER -p $PRODUCTION_REGISTRY_PASSWORD $PRODUCTION_REGISTRY_SERVER"
+    - ssh -o StrictHostKeyChecking=no $SSH_USER@$SERVER_URL "
+      export COMPOSE_PROJECT_NAME=$ENV &&
+      export APP_PORT=$APP_PORT &&
+      export TAG=$IMAGE_VERSION &&
+      docker-compose -f $HOME/docker-compose.yml down --remove-orphans &&
+      docker-compose -f $HOME/docker-compose.yml up -d"
+
+deploy-production:
+  stage: deploy
+  needs:
+    - build
+  extends: .deploy
+  variables:
+    SSH_PRIVATE_KEY: $PRODUCTION_SSH_PRIVATE_KEY
+    SSH_USER: $PRODUCTION_SSH_USER
+    SSH_KEY_PASSWORD: $PRODUCTION_SSH_KEY_PASSWORD
+    SERVER_URL: $PRODUCTION_SERVER_URL
+    ENV: production
+    HOME: /home/opc/todolist
+    APP_PORT: 8080
+
+# 漏洞測試
+npm_package:
+  stage: scan
+  allow_failure: true
+  artifacts:
+    paths:
+      - dependency_scanning.log
+    when: on_failure
+  script:
+    - set +e
+    - npm audit | tee dependency_scanning.log
+    - count=$(grep found dependency_scanning.log | awk -F" " '{print $2}')
+    - if [ "$count" -gt 0 ]; then echo -e "\033[31m 發現 $count 個漏洞，請檢查 \033[0m"; exit 1; fi
+
+.container_scanning:
+  image:
+    name: $DEV_REGISTRY_SERVER/root/images/trivy:0.35.0
+    pull_policy: if-not-present
+  stage: scan
+  variables:
+    BOT_TOKEN: $TELEGRAM_BOT_TOKEN
+    CHAT_ID: $TELEGRAM_CHAT_ID
+  artifacts:
+    paths:
+      - container_scanning.log
+    when: on_failure
+  script:
+    - docker login -u $DEV_REGISTRY_USER -p $DEV_REGISTRY_PASSWORD $DEV_REGISTRY_SERVER
+    - docker pull $IMAGE
+    - trivy image --insecure $IMAGE | tee container_scanning.log
+    - count=$(grep "(UNKNOWN:" container_scanning.log | awk -F" " '{sum+=$2} END {print sum}')
+    - if [ "$count" -gt 0 ]; then
+    -   echo -e "\033[31m 發現 $count 個漏洞，請檢查 \033[0m"
+    -   MSG=$(echo -e "Type：Warning\nEvent：Security\nMsg：$IMAGE 發現 $count 個漏洞，請檢查 $CI_JOB_URL")
+    -   curl --data chat_id="${CHAT_ID}" --data-urlencode "text=${MSG}" "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage"
+    -   exit 1
+    - fi
+
+image_scan:
+  extends:
+    - .container_scanning
+  before_script:
+    - IMAGE_VERSION=$(jq -r .version package.json)
+    - IMAGE=$DEV_REGISTRY_SERVER/root/images/$IMAGE_NAME:$IMAGE_VERSION

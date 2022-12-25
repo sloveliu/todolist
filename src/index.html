@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <title>Hello!</title>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <link href="https://unpkg.com/tailwindcss@^2/dist/tailwind.min.css" rel="stylesheet">
+</head>
+
+<body class="font-sans text-purple-600 pt-20 px-4" style="background:#F8B288">
+  <div class="container mx-auto shadow-2xl border border-purple-200 p-8 max-w-xl bg-white">
+    <h1 class="text-2xl font-medium uppercase text-center border-b-2 border-purple-300 pb-4">
+      My Todo List
+    </h1>
+    <div id="todoElement"></div>
+    <div class="flex justify-between mt-4">
+      <button id="toggleAllButton" class="py-2 px-4 w-40">
+        Toggle All
+      </button>
+      <!-- Add Todo -->
+      <button id="addTodoBtn" class="mr-2 py-2 px-4 rounded w-40">
+        Add
+      </button>
+      <!-- Add Todo Modal -->
+      <div id="newTodoModal" class="modal hidden fixed z-10 top-0 left-0 w-full h-full overflow-auto">
+        <!-- Modal content -->
+        <div class="modal-content bg-purple-100 mx-auto my-40 p-4 shadow" style="width:350px;">
+          <div id="addNewModalCross" class="text-right text-3xl close">&times;</div>
+          <label class="block mb-2 text-purple-600">Add New Todo</label>
+          <input id="addTodoTextInput" type="text"
+            class="mr-2 py-2 px-4 border border-purple-400 focus:bg-purple-100 rounded w-full" />
+          <div class="flex justify-end mt-4">
+            <button id="addNewBtn" class="text-purple-600 font-medium uppercase ">
+              Add New
+            </button>
+          </div>
+        </div>
+      </div>
+      <!-- Update Todo Modal -->
+      <div id="updateTodoModal" data-item="" class="modal hidden fixed z-10 top-0 left-0 w-full h-full overflow-auto">
+        <!-- Modal content -->
+        <div class="modal-content bg-purple-100 mx-auto my-40 p-4 shadow" style="width:350px;">
+          <div id="updateModalCross" class="text-right text-3xl close">&times;</div>
+          <label class="block mb-2 text-purple-600 font-medium uppercase">Update Todo</label>
+          <input id="updateTodoTextInput" type="text"
+            class="mr-2 py-2 px-4 border border-purple-400 focus:bg-purple-100 rounded w-full" />
+          <div class="flex justify-end mt-4">
+            <button id="updateModalBtn" class="text-purple-600 font-medium uppercase ">
+              Update
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
